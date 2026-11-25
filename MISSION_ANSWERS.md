@@ -1,6 +1,6 @@
 # Day 14 Lab — Mission Answers
 
-> **Trạng thái:** Part 1, Part 4 đã làm và đo thật (chạy trên Windows, Python 3.14, không Docker). Part 2, Part 3, Part 5 và phần output `check_production_ready.py` đầy đủ **chưa làm**, vì máy chưa chạy được Docker/WSL2. Các mục đó được đánh dấu `TODO` bên dưới.
+> **Trạng thái:** Part 1, Part 4 đã làm và đo thật (chạy trên Windows, Python 3.14, không Docker). Part 6 đạt `PASS 12/12` (chạy trong Codespaces). Part 2, Part 3 và Part 5 **chưa làm** (cần Docker hoặc tài khoản cloud). Các mục đó được đánh dấu `TODO` bên dưới.
 
 ---
 
@@ -196,9 +196,30 @@ Với token của `teacher`, 15 request liên tiếp đều trả 200 (giới h�
 
 ## Part 6: Final Project
 
-- Code đã viết trong `06-lab-complete/` (xem git log).
-- `python check_production_ready.py --static-only` cho kết quả `28/28 checks passed`; 3/12 tiêu chí đã xác nhận (Docker compose, `.dockerignore`, Public URL config), 9 tiêu chí còn ⚠️ vì cần chạy thật.
-- **Output `check_production_ready.py` đầy đủ (`PASS 12/12`): TODO.** Phải chạy trên Linux/WSL2 có Docker. Không dán kết quả giả.
+- Code nằm trong `06-lab-complete/` (xem git log).
+- Chạy `python check_production_ready.py` đầy đủ (có Docker) trên GitHub Codespaces (Linux), commit `f7e51bf` của nhánh `work/day14`:
+
+```text
+📋 Checklist Deliverable
+     ✅ Dockerfile (multi-stage, < 500 MB)
+     ✅ docker-compose.yml (agent + redis)
+     ✅ .dockerignore
+     ✅ Health check endpoint (GET /health)
+     ✅ Readiness endpoint (GET /ready)
+     ✅ API Key authentication
+     ✅ Rate limiting
+     ✅ Cost guard
+     ✅ Config từ environment variables
+     ✅ Structured logging
+     ✅ Graceful shutdown
+     ✅ Public URL ready (Railway / Render config)
+----------------------------------------------------------------
+  Result: 12/12 tiêu chí đạt · 43/43 checks passed
+  🎉 PASS 12/12 — PRODUCTION READY! Deploy nào!
+```
+
+- Lần chạy đầu trong Codespaces bị lỗi cài đặt vì Python 3.14 không build được `pydantic==2.9.0` (không có wheel cp314), nên tôi nới các version ghim trong `requirements.txt` thành `>=`.
+- Trên máy Windows của tôi script chỉ chạy được một phần (không có Docker, Redis, SIGTERM). Kết quả đầy đủ chỉ lấy từ Codespaces.
 
 ## Part 7
 
