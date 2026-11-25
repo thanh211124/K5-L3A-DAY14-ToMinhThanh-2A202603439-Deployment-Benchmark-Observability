@@ -109,6 +109,13 @@ KNOWLEDGE_BASE: list[tuple[list[str], str]] = [
     (["log", "logging", "json"],
      "Structured logging ghi log dạng JSON với các field cố định (timestamp, level, request_id, trace_id) "
      "để dễ tìm kiếm, lọc và liên kết với trace."),
+    (["hpa", "kubernetes", "autoscal"],
+     "Kubernetes HPA (Horizontal Pod Autoscaler) tự động tăng giảm số pod dựa trên CPU và memory, "
+     "hoặc custom metrics như số request mỗi giây hay độ dài hàng đợi."),
+    (["jwt", "api key"],
+     "JWT là token có chữ ký, mang thông tin người dùng (claims) và hết hạn sau một thời gian, "
+     "server xác thực bằng chữ ký mà không cần tra database. API key là chuỗi tĩnh, không tự hết hạn, "
+     "muốn vô hiệu hoá phải thu hồi thủ công."),
     (["cloud run", "serverless", "railway", "render"],
      "Cloud Run, Railway, Render là nền tảng chạy container managed: tự scale, tự cấp HTTPS, "
      "bạn chỉ cần cung cấp image và biến môi trường."),
