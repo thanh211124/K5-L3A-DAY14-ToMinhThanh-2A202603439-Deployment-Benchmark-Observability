@@ -1,6 +1,6 @@
 # Day 14 Lab — Mission Answers
 
-> **Trạng thái:** Part 1, Part 4 đã làm và đo thật (chạy trên Windows, Python 3.14, không Docker). Part 6 đạt `PASS 12/12` (chạy trong Codespaces). Part 2, Part 3 và Part 5 **chưa làm** (cần Docker hoặc tài khoản cloud). Các mục đó được đánh dấu `TODO` bên dưới.
+> **Trạng thái:** Part 1, Part 4 đã làm và đo thật (chạy trên Windows, Python 3.14, không Docker). Part 6 đạt `PASS 12/12` (chạy trong Codespaces). Part 3 đã deploy lên Render (còn thiếu 3 ảnh trong `screenshots/`). Part 2 và Part 5 **chưa làm** (cần Docker). Các mục đó được đánh dấu `TODO` bên dưới.
 
 ---
 
@@ -89,7 +89,40 @@ POST /ask {"question":""}      → 422 {"detail":"question field is required"}
 
 ## Part 3: Cloud Deployment
 
-**TODO — chưa làm.** Cần deploy agent Part 6 lên Railway hoặc Render (cần đăng nhập tài khoản). Các mục cần có: URL public, so sánh `railway.toml` với `render.yaml`, 3–5 dòng về pipeline Cloud Run (đọc `cloudbuild.yaml` và `service.yaml`).
+### Exercise 3.2: Deploy lên Render (agent Part 6)
+
+- **URL:** https://k5-l3a-day14-tominhthanh-2a202603439.onrender.com
+- Tạo Web Service thủ công trên Render (runtime Docker, gói Free, region Oregon, Root Directory `06-lab-complete`) và một Key Value (Redis) Free cùng region. `REDIS_URL` trỏ tới Internal URL của Key Value; `AGENT_API_KEY` và các biến khác đặt trên dashboard, không ghi trong code. Chi tiết trong `DEPLOYMENT.md`.
+- Kết quả 4 lệnh tự kiểm: `/health` 200, `/ready` 200, `/ask` không key 401, `/ask` có key 200.
+- Ảnh: [dashboard](screenshots/dashboard.png), [running](screenshots/running.png), [test](screenshots/test.png).
+- Tôi **không dùng `render.yaml`** để deploy (đã tạo từng dịch vụ thủ công trên dashboard). Nội dung `render.yaml` vẫn được script chấm kiểm tra tĩnh (tiêu chí 12), nhưng tôi chưa chạy Blueprint nên chưa xác nhận nó deploy được.
+- **Sự cố trong lúc deploy:** lần đầu `REDIS_URL` bị đặt sai định dạng (thiếu `redis://`), nên `redis.from_url` ném `ValueError` lúc import và container sập. Tôi sửa `app/redis_client.py` (thêm `redis://` nếu thiếu; URL sai hẳn thì không làm app sập mà `/ready` trả 503), push commit `d10bdb9`, rồi redeploy. Sau đó `/ready` trả 200.
+
+### Nền tảng còn lại: so sánh `railway.toml` với `render.yaml`
+
+Tôi **không deploy lên Railway**; phần này lấy điểm bằng so sánh hai file cấu hình.
+
+| Điểm | `railway.toml` | `render.yaml` |
+|---|---|---|
+| Phạm vi | Chỉ cấu hình build và deploy của **một service**. Biến môi trường và Redis cấu hình ngoài file (dashboard hoặc CLI `railway variables set`) | Khai báo **cả hệ thống** (Infrastructure as Code): service web, Key Value (Redis), biến môi trường |
+| Build | `builder = "DOCKERFILE"`, `dockerfilePath = "Dockerfile"` | `runtime: docker`, `dockerfilePath` và `dockerContext` (tính từ **gốc repo**, nên tôi dùng `./06-lab-complete/...`) |
+| Health check | `healthcheckPath = "/health"`, `healthcheckTimeout = 30` | `healthCheckPath: /health` |
+| Restart | `restartPolicyType = "ON_FAILURE"`, tối đa 3 lần | Không khai báo (Render có chính sách mặc định riêng) |
+| Secret / env | Không có trong file | `AGENT_API_KEY` dùng `generateValue: true` để Render tự sinh, không ghi giá trị vào repo; `REDIS_URL` lấy từ service Key Value qua `fromService` |
+| Redis | Phải tạo bằng tay trên dashboard rồi gán `REDIS_URL` | Khai báo luôn `type: keyvalue` trong cùng file, nối tự động |
+| Khi nào dùng | Cấu hình tối thiểu, cho service đã tồn tại | Dựng cả stack bằng một Blueprint |
+
+Khác biệt chính: `render.yaml` mô tả cả hệ thống nên kết nối Redis tự động; `railway.toml` chỉ mô tả cách build và kiểm tra sức khỏe cho một service.
+
+### Exercise 3.3: Pipeline CI/CD của Cloud Run (chỉ đọc, không deploy)
+
+Từ `03-cloud-deployment/production-cloud-run/`:
+- `cloudbuild.yaml` chạy khi có commit mới trên `main`, gồm 4 bước nối nhau bằng `waitFor`: **(1) test**: cài `requirements.txt`, chạy `pytest tests/`; **(2) build** image Docker, gắn tag theo `$COMMIT_SHA` và `latest`, dùng `--cache-from` để tận dụng layer cache; **(3) push** image lên Container Registry (`gcr.io/$PROJECT_ID/ai-agent`); **(4) deploy** lên Cloud Run vùng `asia-southeast1` với `min-instances=1` (tránh cold start), `max-instances=10`, 512Mi RAM, 1 CPU, `ENVIRONMENT=production`, và lấy `OPENAI_API_KEY` từ Secret Manager thay vì ghi trong file. Test fail thì các bước sau không chạy.
+- `service.yaml` là định nghĩa Cloud Run service kiểu Knative (IaC): giới hạn scale 1–10 instance, tối đa 80 request đồng thời mỗi instance, timeout 60 giây; secret `OPENAI_API_KEY` và `AGENT_API_KEY` lấy từ Secret Manager; `livenessProbe` gọi `/health`, `startupProbe` gọi `/ready`. Triển khai bằng `gcloud run services replace service.yaml`.
+- Tôi chỉ đọc hai file này, không có tài khoản GCP nên chưa chạy. Tôi cũng không kiểm tra thư mục `tests/` mà bước 1 gọi có tồn tại hay không.
+
+### Việc còn lại cho Part 3
+- Thêm 3 ảnh vào `screenshots/` (`dashboard.png`, `running.png`, `test.png`). Thư mục này chưa có trong repo tại thời điểm viết.
 
 ---
 
@@ -236,5 +269,6 @@ Xem `BENCHMARK_REPORT.md`. Bước 1 (local) đã làm; Bước 2 (Docker stack)
 | 3 | Viết code Part 6 (`app/*.py`, Dockerfile, compose, railway.toml, render.yaml) | AI viết toàn bộ các file `TODO` | Chạy `check_production_ready.py --static-only` (28/28); test hành vi bằng fakeredis. **Chưa** build Docker, chưa test SIGTERM |
 | 4 | Part 7 Bước 1: load test, eval, sửa `KNOWLEDGE_BASE` | AI chạy các lệnh và thêm 2 entry (HPA, JWT) | Số liệu lấy từ file JSON trong `reports/`; eval v2 sau khi sửa đạt 23/23, 0 regression |
 | 5 | Part 1 và Part 4: chạy bài tập và viết câu trả lời | AI chạy các lệnh curl trên máy và ghi output | Output ở trên là kết quả chạy thật; phần nhận xét tôi cần đọc lại và tự giải thích được |
+| 6 | Deploy lên Render, sửa lỗi `REDIS_URL` sai định dạng làm container sập | AI đọc stack trace, sửa `app/redis_client.py` (thêm scheme, không sập khi URL sai), viết `DEPLOYMENT.md` và mục Part 3 | Gọi `/health`, `/ready` từ ngoài (200/200); 4 lệnh tự kiểm cho kết quả 200 200 401 200; kiểm tra lại logic với nhiều dạng URL sai |
 
 > Ghi chú: mục AI log cần được tôi xem lại và tự giải thích được từng đoạn code trước khi nộp (theo RULES.md).
