@@ -1,15 +1,20 @@
-"""
-API Key authentication (tiêu chí 6).
+"""API Key authentication: header X-API-Key phải trùng AGENT_API_KEY, sai/thiếu → 401."""
+import hmac
 
-Yêu cầu:
-  • Client gửi header  X-API-Key: <key>
-  • Key phải trùng biến môi trường AGENT_API_KEY
-  • Thiếu hoặc sai key → HTTP 401 (không phải 403 hay 422)
-"""
+from fastapi import HTTPException, Security
+from fastapi.security import APIKeyHeader
+
+from app.config import settings
+
+_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
-def verify_api_key() -> str:
-    """Dependency cho FastAPI — dùng trong /ask: Depends(verify_api_key)."""
-    # TODO: đọc header X-API-Key (gợi ý: fastapi.security.APIKeyHeader),
-    #       so sánh với settings.agent_api_key; thiếu/sai → raise HTTPException(status_code=401)
-    raise NotImplementedError("TODO: verify_api_key")
+def verify_api_key(api_key: str | None = Security(_header)) -> str:
+    expected = settings.agent_api_key
+    if not api_key or not expected or not hmac.compare_digest(api_key, expected):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or missing API key",
+            headers={"WWW-Authenticate": "ApiKey"},
+        )
+    return api_key
