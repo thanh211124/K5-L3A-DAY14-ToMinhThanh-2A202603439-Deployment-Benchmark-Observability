@@ -1,6 +1,6 @@
 # Day 14 Lab — Mission Answers
 
-> **Trạng thái:** Part 1, Part 4 đã làm và đo thật (chạy trên Windows, Python 3.14, không Docker). Part 6 đạt `PASS 12/12` (chạy trong Codespaces). Part 3 đã deploy lên Render (còn thiếu 3 ảnh trong `screenshots/`). Part 2 và Part 5 **chưa làm** (cần Docker). Các mục đó được đánh dấu `TODO` bên dưới.
+> **Trạng thái:** Part 1, Part 4 đã làm và đo thật (chạy trên Windows, Python 3.14, không Docker). Part 6 đạt `PASS 12/12` (chạy trong Codespaces). Part 3 đã deploy lên Render (có 3 ảnh). Part 2 và Part 5 đã chạy trong Codespaces và ghi số đo thật. Phần còn thiếu của cả bài là Part 7 Bước 2 (xem `BENCHMARK_REPORT.md`).
 
 ---
 
@@ -85,7 +85,84 @@ POST /ask {"question":""}      → 422 {"detail":"question field is required"}
 
 ## Part 2: Docker
 
-**TODO — chưa làm.** Cần Docker để đo kích thước image (`docker images`) và chạy stack Compose. Không điền số ước lượng.
+Số liệu lấy từ lần chạy trong GitHub Codespaces (Linux, Docker 29.9, Compose v5.6): `evidence/part2_part5.log` (build, kích thước, SIGTERM) và `evidence/part2_part5_rerun.log` (compose, scaling).
+
+### Exercise 2.1: Dockerfile cơ bản (`02-docker/develop/Dockerfile`)
+
+1. **Base image:** `python:3.11` (bản đầy đủ, không phải `-slim`).
+2. **Working directory:** `/app` (`WORKDIR /app`).
+3. **Vì sao `COPY requirements.txt` trước:** Docker cache theo từng layer. Nếu chỉ đổi code mà `requirements.txt` không đổi thì layer `pip install` được dùng lại, build nhanh hơn nhiều. Copy toàn bộ code trước sẽ làm cache của bước cài thư viện bị vô hiệu mỗi lần sửa code.
+4. **`CMD` và `ENTRYPOINT`:** `CMD` là lệnh mặc định và bị thay thế hoàn toàn nếu truyền lệnh khác khi `docker run`; `ENTRYPOINT` là lệnh cố định của container, tham số truyền thêm khi `docker run` được nối vào làm đối số. (Đây là kiến thức chung, không đo trong lab; Dockerfile này chỉ dùng `CMD ["python", "app.py"]`.)
+
+### Exercise 2.2: Build và run (bản develop)
+
+```text
+$ docker run -d --name k5-p2-dev -p 8000:8000 my-agent:develop
+$ curl -s -i -X POST "http://localhost:8000/ask?question=What%20is%20Docker"
+HTTP/1.1 200 OK
+{"answer":"Container là cách đóng gói app để chạy ở mọi nơi. Build once, run anywhere!"}
+```
+
+(Bản develop nhận `question` qua query string, không nhận JSON.)
+
+### Exercise 2.3: Multi-stage build (`02-docker/production/Dockerfile`)
+
+- **Stage 1 (`builder`):** `python:3.11-slim`, cài `gcc` và `libpq-dev` (công cụ build), rồi `pip install --user` vào `/root/.local`. Image này chỉ để build, không dùng để chạy.
+- **Stage 2 (`runtime`):** `python:3.11-slim` mới, tạo user `appuser` (non-root), chỉ copy `/root/.local` (thư viện đã cài) từ stage 1 cùng `main.py` và `utils/mock_llm.py`, thêm `HEALTHCHECK`, chạy `uvicorn ... --workers 2`.
+- **Vì sao nhỏ hơn:** (1) base `-slim` thay vì bản đầy đủ; (2) `gcc`, `libpq-dev` và bộ nhớ đệm apt chỉ nằm ở stage builder và không được copy sang stage cuối; (3) `--no-cache-dir` nên không giữ cache pip. Ngoài kích thước, stage cuối còn chạy bằng user không phải root.
+
+**Kích thước image (đo bằng `docker images` / `docker image inspect`):**
+
+| Image | Kích thước |
+|---|---|
+| `my-agent:develop` (single-stage, `python:3.11`) | 1668.2 MB (1.67 GB) |
+| `my-agent:advanced` (multi-stage, `-slim`) | 240.2 MB |
+| **Chênh lệch** | **nhỏ hơn 85.6%** (advanced bằng 14.4% develop) |
+
+Kiểm tra bảo mật: `docker exec k5-p2-adv whoami` trả `appuser`, tức container production không chạy bằng root. `GET /health` của bản advanced trả 200.
+
+### Exercise 2.4: Docker Compose stack (`02-docker/production/docker-compose.yml`)
+
+**Kiến trúc (4 service trong network `internal`):**
+
+```text
+ client --:80--> nginx (reverse proxy, rate limit 10 r/s)
+                   |  proxy_pass http://agent:8000
+                   v
+                 agent (FastAPI, uvicorn --workers 2)
+                   |  depends_on (condition: service_healthy)
+          +--------+---------+
+          v                  v
+   redis:7-alpine      qdrant:v1.9.0
+   (volume redis_data) (volume qdrant_data)
+
+ Tất cả nằm trong network "internal"; chỉ nginx mở cổng 80/443 ra ngoài.
+```
+
+- Chỉ `nginx` mở cổng ra ngoài (80 và 443); `agent`, `redis`, `qdrant` chỉ nói chuyện với nhau qua network `internal` bằng tên service (DNS của Docker). `agent` chỉ khởi động khi `redis` và `qdrant` đã `healthy`.
+- **Lưu ý:** trong code `02-docker/production/main.py` tôi không tìm thấy chỗ nào dùng Redis hay Qdrant (`grep` không ra kết quả), nên với bài này hai service đó được dựng lên nhưng agent chưa gọi tới chúng.
+
+```text
+$ docker compose -p k5-day14-stack ps
+agent-1   Up (health: starting)   8000/tcp
+nginx-1   Up                      0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp
+qdrant-1  Up (healthy)            6333-6334/tcp
+redis-1   Up (healthy)            6379/tcp
+
+$ curl -s -i http://localhost/health        -> HTTP/1.1 200 OK  {"status":"ok","uptime_seconds":0.7,"version":"2.0.0",...}
+$ curl -s -i -X POST http://localhost/ask -H "Content-Type: application/json" -d '{"question":"Explain microservices"}'
+                                             -> HTTP/1.1 200 OK  {"answer":"Agent đang hoạt động tốt! (mock response) ..."}
+```
+
+Response đi qua Nginx có header `X-Frame-Options: DENY` và `X-Content-Type-Options: nosniff`. Log của agent cho thấy `--workers 2` (hai dòng `Agent ready`).
+
+Ghi chú về lần chạy đầu: lần đầu `curl` qua Nginx trả **502** vì script của tôi gọi khi uvicorn chưa khởi động xong (script chờ sai điều kiện: coi mọi phản hồi HTTP là sẵn sàng). Chạy lại sau khi chờ `/health` trả 200 thật thì cả hai lệnh cho 200.
+
+### Checkpoint 2
+- Cấu trúc Dockerfile: base, workdir, copy requirements trước để cache, copy code, `CMD`.
+- Multi-stage giảm 85.6% kích thước ở bài này.
+- Docker Compose dựng 4 service, có healthcheck và `depends_on` theo trạng thái `healthy`.
+- Debug container: đã dùng `docker logs`, `docker exec` (`whoami`), `docker compose logs`.
 
 ## Part 3: Cloud Deployment
 
@@ -223,7 +300,96 @@ Với token của `teacher`, 15 request liên tiếp đều trả 200 (giới h�
 
 ## Part 5: Scaling & Reliability
 
-**TODO — chưa làm.** Cần Docker Compose (`--scale agent=3`) cho Exercise 5.4 và 5.5.
+Số liệu lấy từ GitHub Codespaces: `evidence/part2_part5.log` (5.1, 5.2) và `evidence/part2_part5_rerun.log` (5.4, 5.5).
+
+### Exercise 5.1: Health checks (`05-scaling-reliability/develop/app.py`)
+
+Bản develop đã có sẵn hai endpoint (tôi đọc code và chạy thật, không tự viết lại):
+
+- `GET /health` (liveness): luôn trả 200 khi process còn sống, kèm uptime, version, và kiểm tra bộ nhớ qua `psutil`.
+- `GET /ready` (readiness): trả **503** nếu `_is_ready` còn `False` (đang khởi động hoặc đang shutdown), ngược lại trả 200 kèm số request đang xử lý.
+
+```text
+GET /health -> 200 {"status":"ok","uptime_seconds":1.5,"version":"1.0.0",...,"checks":{"memory":{"status":"ok","used_percent":24.2}}}
+GET /ready  -> 200 {"ready":true,"in_flight_requests":1}
+```
+
+`in_flight_requests: 1` là chính request `/ready` đang được đếm. Ở bản production (`05-scaling-reliability/production/app.py`), `/ready` còn kiểm tra Redis và trả 503 nếu Redis không phản hồi.
+
+**Liveness và readiness khác nhau:** liveness trả lời "process còn sống không?" (fail thì platform restart container). Readiness trả lời "có sẵn sàng nhận traffic chưa?" (fail thì load balancer ngừng gửi request tới instance đó, không restart).
+
+### Exercise 5.2: Graceful shutdown
+
+Tôi chạy `python app.py`, gửi một request `/ask`, rồi gửi `SIGTERM` ngay sau đó (lệnh `kill -TERM`). Kết quả:
+
+```text
+request đang chạy lúc nhận SIGTERM -> HTTP/1.1 200 OK (connection: close)
+                                      {"answer":"Tôi là AI agent được deploy lên cloud. ..."}
+process -> đã thoát
+log server:
+  INFO:  Shutting down
+  INFO:  127.0.0.1 - "POST /ask?question=Long%20task HTTP/1.1" 200 OK
+  INFO:  Waiting for application shutdown.
+  INFO 🔄 Graceful shutdown initiated...
+  INFO ✅ Shutdown complete
+  INFO:  Finished server process
+```
+
+Request đang chạy vẫn hoàn thành với 200 rồi server mới tắt. Cơ chế: uvicorn bắt `SIGTERM`, ngừng nhận kết nối mới, chờ request đang xử lý xong, rồi chạy phần shutdown của `lifespan`. Ở đó app đặt `_is_ready = False` và chờ tối đa 30 giây cho `_in_flight_requests` về 0. Handler `signal.signal(SIGTERM, ...)` trong file chỉ ghi log, việc tắt thật do uvicorn lo.
+
+Hạn chế của phép thử: request mock chỉ kéo dài khoảng 0,1 giây, nên đây là bằng chứng cho đường đi đúng, không phải thử tải với request dài.
+
+### Exercise 5.3: Stateless design (`05-scaling-reliability/production/app.py`)
+
+- Bản production lưu hội thoại trong **Redis** (`save_session` ghi `session:{id}` bằng `setex` với TTL 3600 giây, `load_session` đọc lại), không giữ state trong RAM của process.
+- Nếu Redis không kết nối được, code fallback sang dict trong RAM (`_memory_store`) và in cảnh báo "not scalable". Trong chế độ đó, nhiều instance sẽ không chia sẻ được session.
+- **Vì sao phải stateless:** khi scale ra nhiều instance, mỗi instance có bộ nhớ riêng; nếu session nằm trong RAM thì request kế tiếp rơi vào instance khác sẽ không thấy lịch sử. Đưa state ra Redis cho mọi instance dùng chung.
+
+### Exercise 5.4: Load balancing với Nginx
+
+Chạy `docker compose -p k5-day14-scaling up -d --build --scale agent=3`: có 3 agent + 1 Nginx (cổng 8080) + 1 Redis, cả 3 agent `healthy`. Nginx dùng `upstream agent_cluster { server agent:8000; }` và DNS của Docker trả về địa chỉ của cả 3 container, nên request được phân phối vòng tròn. Response có header `X-Served-By` (địa chỉ upstream) và trường `served_by` (ID instance).
+
+10 request liên tiếp tới `POST /chat`:
+
+```text
+request 1 -> instance-5c40aa     request 6  -> instance-0ba4f3
+request 2 -> instance-398a1d     request 7  -> instance-5c40aa
+request 3 -> instance-0ba4f3     request 8  -> instance-398a1d
+request 4 -> instance-5c40aa     request 9  -> instance-0ba4f3
+request 5 -> instance-398a1d     request 10 -> instance-5c40aa
+```
+
+Phân phối: `5c40aa` 4 lần, `398a1d` 3 lần, `0ba4f3` 3 lần, tức vòng tròn đều. Log của từng container agent cũng ghi các dòng `POST /chat 200`, và log Nginx ghi `POST /chat 200` cho từng request.
+
+**Khi một instance chết:** tôi dừng một container (`docker stop`, tương ứng `agent-1`/`instance-0ba4f3`) rồi gọi tiếp 3 request cùng session. Cả 3 trả 200 và được phục vụ bởi 2 instance còn lại (`5c40aa`, `398a1d`). Log Nginx có một dòng lỗi:
+
+```text
+[error] upstream timed out (110: Operation timed out) while connecting to upstream,
+        request: "POST /chat HTTP/1.1", upstream: "http://172.18.0.4:8000/chat"
+```
+
+ngay sau đó là `POST /chat 200`. Tức là Nginx thử container đã dừng, chờ hết timeout kết nối, rồi chuyển sang instance khác nhờ `proxy_next_upstream error timeout http_503`. Khoảng cách thời gian giữa dòng log trước đó (10:32:06) và dòng lỗi (10:33:08) là khoảng 62 giây, khớp với `proxy_connect_timeout` mặc định 60 giây (cấu hình Nginx của bài không đặt giá trị này); đây là suy luận của tôi từ log, không phải số đo thời gian chờ của từng request. Nghĩa là **failover hoạt động nhưng request đầu tiên rơi vào instance chết có thể bị chậm tới ~60 giây**; đặt `proxy_connect_timeout` ngắn hơn (vài giây) sẽ cải thiện.
+
+### Exercise 5.5: Test stateless (`test_stateless.py`)
+
+```text
+Total requests: 5
+Instances used: {'instance-5c40aa', 'instance-0ba4f3', 'instance-398a1d'}
+All requests served despite different instances!
+--- Conversation History ---
+Total messages: 10
+Session history preserved across all instances via Redis!
+```
+
+5 request trong cùng một session được 3 instance khác nhau phục vụ, nhưng lịch sử có đủ 10 tin nhắn (5 câu hỏi + 5 câu trả lời): vì state nằm trong Redis chứ không nằm trong instance nào. Lưu ý script `test_stateless.py` **không tự tắt instance nào**, nên tôi làm thêm phép thử riêng:
+
+- Tạo session, dừng một instance, gọi tiếp 3 request với cùng `session_id`: cả 3 thành công và `GET /chat/{session_id}/history` trả `messages in history: 8` = 2 tin nhắn lúc tạo session + 3 x 2 tin nhắn sau khi dừng instance. Không mất tin nhắn nào.
+
+### Checkpoint 5
+- Health và readiness: đã đọc, chạy và phân biệt.
+- Graceful shutdown: request đang chạy vẫn hoàn thành khi nhận SIGTERM (phép thử ngắn).
+- Stateless: session lưu trong Redis, đã chứng minh qua 3 instance và qua việc dừng một instance.
+- Load balancing: Nginx round-robin 4/3/3 trên 10 request, có failover nhưng chậm ở request đầu sau khi instance chết.
 
 ---
 
@@ -270,5 +436,6 @@ Xem `BENCHMARK_REPORT.md`. Bước 1 (local) đã làm; Bước 2 (Docker stack)
 | 4 | Part 7 Bước 1: load test, eval, sửa `KNOWLEDGE_BASE` | AI chạy các lệnh và thêm 2 entry (HPA, JWT) | Số liệu lấy từ file JSON trong `reports/`; eval v2 sau khi sửa đạt 23/23, 0 regression |
 | 5 | Part 1 và Part 4: chạy bài tập và viết câu trả lời | AI chạy các lệnh curl trên máy và ghi output | Output ở trên là kết quả chạy thật; phần nhận xét tôi cần đọc lại và tự giải thích được |
 | 6 | Deploy lên Render, sửa lỗi `REDIS_URL` sai định dạng làm container sập | AI đọc stack trace, sửa `app/redis_client.py` (thêm scheme, không sập khi URL sai), viết `DEPLOYMENT.md` và mục Part 3 | Gọi `/health`, `/ready` từ ngoài (200/200); 4 lệnh tự kiểm cho kết quả 200 200 401 200; kiểm tra lại logic với nhiều dạng URL sai |
+| 7 | Part 2 và Part 5 trong Codespaces (script thu thập log) | AI viết `scripts/part2_part5.sh` và `scripts/rerun_compose_scaling.sh`, phân tích log, sửa lỗi script chờ sai (coi 502 là sẵn sàng) và viết câu trả lời | Số liệu lấy từ `evidence/*.log` do tôi chạy; kích thước image, SIGTERM, round-robin 4/3/3 và phép thử dừng instance đều có trong log |
 
 > Ghi chú: mục AI log cần được tôi xem lại và tự giải thích được từng đoạn code trước khi nộp (theo RULES.md).
