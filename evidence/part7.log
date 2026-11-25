@@ -1,0 +1,163 @@
+
+### UP — bật stack và unit test alert
+$ docker compose -p k5-day14-observability up -d --build --scale agent=2
+$ docker compose -p k5-day14-observability ps
+NAME                                  IMAGE                          COMMAND                  SERVICE      CREATED          STATUS                    PORTS
+k5-day14-observability-agent-1        k5-day14-observability-agent   "uvicorn app.main:ap…"   agent        18 seconds ago   Up 17 seconds (healthy)   8000/tcp
+k5-day14-observability-agent-2        k5-day14-observability-agent   "uvicorn app.main:ap…"   agent        18 seconds ago   Up 17 seconds (healthy)   8000/tcp
+k5-day14-observability-grafana-1      grafana/grafana:13.2.4         "/run.sh"                grafana      13 minutes ago   Up 13 minutes             0.0.0.0:3000->3000/tcp, [::]:3000->3000/tcp
+k5-day14-observability-jaeger-1       jaegertracing/jaeger:2.23.0    "/cmd/jaeger/jaeger-…"   jaeger       13 minutes ago   Up 13 minutes             4317/tcp, 5778-5779/tcp, 9411/tcp, 13132-13133/tcp, 14250/tcp, 0.0.0.0:4318->4318/tcp, [::]:4318->4318/tcp, 14268/tcp, 0.0.0.0:16686->16686/tcp, [::]:16686->16686/tcp
+k5-day14-observability-locust-1       locustio/locust:2.47.0         "locust -f /mnt/locu…"   locust       13 minutes ago   Up 13 minutes             5557/tcp, 0.0.0.0:8089->8089/tcp, [::]:8089->8089/tcp
+k5-day14-observability-nginx-1        nginx:1.28-alpine              "/docker-entrypoint.…"   nginx        13 minutes ago   Up 13 minutes             0.0.0.0:8080->80/tcp, [::]:8080->80/tcp
+k5-day14-observability-prometheus-1   prom/prometheus:v3.16.0        "/bin/prometheus --c…"   prometheus   13 minutes ago   Up 13 minutes             0.0.0.0:9090->9090/tcp, [::]:9090->9090/tcp
+
+### UP — promtool unit test cho alert rules
+$ docker run --rm -v "$PWD/prometheus:/p" --entrypoint promtool prom/prometheus:v3.16.0 test rules /p/alert_rules_test.yml
+Processing test file: /p/alert_rules_test.yml
+  SUCCESS
+
+
+### UP — /metrics không public qua Nginx (câu hỏi 7.4 số 4)
+$ curl -i http://localhost:8080/metrics
+HTTP/1.1 404 Not Found
+Server: nginx/1.28.3
+Date: Wed, 25 Nov 2026 10:56:03 GMT
+Content-Type: text/html
+Content-Length: 153
+Connection: keep-alive
+
+<html>
+$ curl -i -X POST http://localhost:8080/ask (có key)
+HTTP/1.1 200 OK
+Server: nginx/1.28.3
+Date: Wed, 25 Nov 2026 10:56:03 GMT
+Content-Type: application/json
+Content-Length: 449
+Connection: keep-alive
+x-request-id: b51705e3a502
+x-trace-id: 5fb8d703c20371356c0942d0c5df267a
+X-Served-By: 172.18.0.8:8000
+
+{"answer":"Distributed tracing ghi lại một request đi qua những bước nào. Mỗi bước là một span có thời gian bắt đầu, kết thúc và attributes. OpenTelemetry thu thập trace và gửi tới Jaeger để xem.","model":"mock-llm-small","agent_version":"v2","usage":{"input_tokens":81,"output_tokens":46,"cost_usd":3.975e-05},"llm_latency_ms":159.7,"request_id":"b51705e3a502","trace_id":"5fb8d703c20371356c0942d0c5df267a"}
+Mở các UI qua tab PORTS của Codespaces: 3000 (Grafana), 9090 (Prometheus), 16686 (Jaeger), 8089 (Locust).
+Grafana đăng nhập admin/admin (hoặc xem ẩn danh).
+
+### SCALE — Locust headless, 100 users, ramp 10/s, 2 phút, 1 instance
+$ docker compose up -d --scale agent=1
+$ docker compose run --rm locust ... --headless -u 100 -r 10 -t 2m --csv /mnt/results/scale_1
+>>> Trong lúc này (2 phút) mở Grafana (cổng 3000) và CHỤP dashboard khi đang có tải -> screenshots/grafana-dashboard.png
+------------------|---------------------------------------------------------------------------------------------------------------------------------------------
+
+
+Kết quả scale_1:
+  /ask        requests=  7177 failures=   80 RPS=60.23  p50=190ms p95=260ms p99=1700ms avg=242ms
+  Aggregated  requests=  7856 failures=   80 RPS=65.93  p50=190ms p95=250ms p99=1700ms avg=221ms
+
+### SCALE — 3 instance
+$ docker compose up -d --scale agent=3
+$ kiểm tra Prometheus thấy 3 target:
+3
+$ docker compose run --rm locust ... --headless -u 100 -r 10 -t 2m --csv /mnt/results/scale_3
+------------------|---------------------------------------------------------------------------------------------------------------------------------------------
+
+
+Kết quả scale_3:
+  /ask        requests=  7099 failures=   72 RPS=59.58  p50=190ms p95=240ms p99=1700ms avg=240ms
+  Aggregated  requests=  7830 failures=   72 RPS=65.72  p50=190ms p95=240ms p99=1700ms avg=218ms
+Đã copy CSV vào benchmark-results/ ở gốc repo.
+
+### SCALE — đưa về 2 instance cho các bước sau
+
+### TRACE — tạo tải ngắn (20 user, 90 giây) để có trace chậm và trace lỗi
+(tăng nhẹ tỉ lệ lỗi và chậm để chắc chắn có mẫu: MOCK_ERROR_RATE=0.1, MOCK_SLOW_RATE=0.1)
+
+
+
+### TRACE — phân tích trace từ Jaeger API (service observable-agent)
+
+### TRACE — log JSON có cùng trace_id (grep llm_error)
+$ docker compose logs agent | grep llm_error | head -1
+agent-2  | {"ts": "2026-11-25T11:02:54.825308+00:00", "level": "INFO", "service": "observable-agent", "instance": "c122ce34479b", "event": "llm_error", "trace_id": "4cbba6c4adbadef082febc11d8b342d8", "span_id": "d20c41f079829c49", "request_id": "601a6c74e892", "error": "Upstream LLM error: 503 Service Unavailable (mock)"}
+trace_id trong log = 4cbba6c4adbadef082febc11d8b342d8
+Jaeger tìm thấy trace này? HTTP 200 (200 = có)
+
+>>> MỞ JAEGER (cổng 16686) và CHỤP 2 ảnh:
+    1) Trace chậm nhất (trace_id ở trên) -> screenshots/jaeger-slow-trace.png
+    2) Trace lỗi (trace_id ở trên) thấy event exception -> screenshots/jaeger-error-trace.png
+    Dán trace_id vào ô 'Lookup by Trace ID' hoặc mở http://localhost:16686/trace/<trace_id>
+
+>>> Chụp 2 ảnh Jaeger
+>>> Chụp xong thì nhấn Enter để tiếp tục... 
+### CHAOS — thí nghiệm phá hệ thống (giữ ~30 user Locust chạy nền suốt thời gian này)
+Chờ 90s để có số liệu nền...
+Alert ở trạng thái nền: N/A Expecting value: line 1 column 1 (char 0)
+p95 /ask (1m)      : N/A Expecting value: line 1 column 1 (char 0)
+avg /ask (1m)      : N/A Expecting value: line 1 column 1 (char 0)
+req/s theo instance: N/A Expecting value: line 1 column 1 (char 0)
+tokens/s theo loại : N/A Expecting value: line 1 column 1 (char 0)
+cost USD/giờ (5m)  : N/A Expecting value: line 1 column 1 (char 0)
+
+>>> Nếu chưa chụp: chụp Grafana đang có tải -> screenshots/grafana-dashboard.png
+>>> Chụp xong thì nhấn Enter để tiếp tục... 
+### THÍ NGHIỆM A — MOCK_ERROR_RATE=0.2 (mong đợi AgentHighErrorRate)
+Kiểm tra stack: bật các service còn thiếu (up -d --scale agent=2)...
+NAME                                  IMAGE                          COMMAND                  SERVICE      CREATED              STATUS                        PORTS
+k5-day14-observability-agent-1        k5-day14-observability-agent   "uvicorn app.main:ap…"   agent        About a minute ago   Up About a minute (healthy)   8000/tcp
+k5-day14-observability-agent-2        k5-day14-observability-agent   "uvicorn app.main:ap…"   agent        About a minute ago   Up About a minute (healthy)   8000/tcp
+k5-day14-observability-grafana-1      grafana/grafana:13.2.4         "/run.sh"                grafana      About an hour ago    Up About a minute             0.0.0.0:3000->3000/tcp, [::]:3000->3000/tcp
+k5-day14-observability-jaeger-1       jaegertracing/jaeger:2.23.0    "/cmd/jaeger/jaeger-…"   jaeger       About an hour ago    Up 9 minutes                  4317/tcp, 5778-5779/tcp, 9411/tcp, 13132-13133/tcp, 14250/tcp, 0.0.0.0:4318->4318/tcp, [::]:4318->4318/tcp, 14268/tcp, 0.0.0.0:16686->16686/tcp, [::]:16686->16686/tcp
+k5-day14-observability-locust-1       locustio/locust:2.47.0         "locust -f /mnt/locu…"   locust       About an hour ago    Up About a minute             5557/tcp, 0.0.0.0:8089->8089/tcp, [::]:8089->8089/tcp
+k5-day14-observability-nginx-1        nginx:1.28-alpine              "/docker-entrypoint.…"   nginx        About an hour ago    Up 8 minutes                  0.0.0.0:8080->80/tcp, [::]:8080->80/tcp
+k5-day14-observability-prometheus-1   prom/prometheus:v3.16.0        "/bin/prometheus --c…"   prometheus   About an hour ago    Up About a minute             0.0.0.0:9090->9090/tcp, [::]:9090->9090/tcp
+
+### CHAOS — thí nghiệm phá hệ thống (giữ ~30 user Locust chạy nền suốt thời gian này)
+Chờ 90s để có số liệu nền...
+Alert ở trạng thái nền: (không có alert nào pending/firing)
+p95 /ask (1m)      : 0.2938
+avg /ask (1m)      : 0.2362
+req/s theo instance: {'instance': '172.18.0.3:8000'} = 9.436 | {'instance': '172.18.0.4:8000'} = 9.218
+tokens/s theo loại : {'type': 'input'} = 1358 | {'type': 'output'} = 720.7
+cost USD/giờ (5m)  : 1.237
+
+>>> Nếu chưa chụp: chụp Grafana đang có tải -> screenshots/grafana-dashboard.png
+>>> Chụp xong thì nhấn Enter để tiếp tục... 
+### THÍ NGHIỆM A — MOCK_ERROR_RATE=0.2 (mong đợi AgentHighErrorRate)
+  -> AgentHighErrorRate: pending sau 10s, FIRING sau 71s (tính từ lúc áp dụng thay đổi)
+  error rate 1m: 0.2041
+  alert đã hết firing sau 187s
+
+### THÍ NGHIỆM B — MOCK_SLOW_RATE=0.3 (mong đợi AgentHighLatencyP95)
+  -> AgentHighLatencyP95: pending sau 5s, FIRING sau 126s (tính từ lúc áp dụng thay đổi)
+  p95 1m: 1.913
+  alert đã hết firing sau 156s
+
+### THÍ NGHIỆM C — LLM_MODEL=mock-llm-large (mong đợi LLMCostBurnRateHigh)
+  (lưu ý: ở trạng thái nền, cost/giờ = 2.028)
+  -> LLMCostBurnRateHigh: pending sau 10s, FIRING sau 126s (tính từ lúc áp dụng thay đổi)
+  cost USD/giờ (5m): 15.69
+  alert vẫn firing sau 300s: LLMCostBurnRateHigh=firing
+
+### THÍ NGHIỆM D — docker pause 1 instance (mong đợi AgentInstanceDown)
+  pause container 60f572d0659eed4984b5fbe782509c6c157d85492c23c5391a619e2eed5ef290
+  -> AgentInstanceDown: pending sau 10s, FIRING sau 41s (tính từ lúc áp dụng thay đổi)
+  tỉ lệ 5xx mà agent tự thấy: 0.01191
+  (504 do Nginx không nằm trong metric của agent — xem câu hỏi trong README mục 2.6)
+  unpause xong
+  alert vẫn firing sau 300s: LLMCostBurnRateHigh=firing
+
+### THÍ NGHIỆM E — AGENT_VERSION=v1 (mong đợi KHÔNG alert nào firing)
+  chờ 150s rồi xem alert...
+  alert sau 150s: (không có alert nào pending/firing)
+  retrieval/tokens/s: {'type': 'input'} = 707.3 | {'type': 'output'} = 384.5
+
+### THÍ NGHIỆM F — 2 alert CÙNG firing để chụp ảnh (MOCK_ERROR_RATE=0.2 + MOCK_SLOW_RATE=0.3)
+  -> AgentHighErrorRate: pending sau 10s, FIRING sau 70s (tính từ lúc áp dụng thay đổi)
+  -> AgentHighLatencyP95: pending sau 0s, FIRING sau 51s (tính từ lúc áp dụng thay đổi)
+  trạng thái alert lúc này: AgentHighErrorRate=firing AgentHighLatencyP95=firing
+>>> MỞ PROMETHEUS (cổng 9090) -> tab Alerts, thấy >= 2 alert màu đỏ FIRING cùng lúc.
+>>> CHỤP ảnh -> screenshots/prometheus-alert-firing.png
+
+>>> Chụp trang Alerts của Prometheus khi đang có >= 2 alert FIRING
+>>> Chụp xong thì nhấn Enter để tiếp tục... 
+### CHAOS — dọn và trả cấu hình mặc định
+XONG chaos. Alert hiện tại: AgentHighErrorRate=firing AgentHighLatencyP95=firing
