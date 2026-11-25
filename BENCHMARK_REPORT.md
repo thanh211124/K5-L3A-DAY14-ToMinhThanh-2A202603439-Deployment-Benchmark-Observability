@@ -89,7 +89,20 @@ Không sửa `golden_dataset.jsonl`. Sau khi sửa, tôi khởi động lại v2
   run: python eval/run_eval.py --url http://localhost:8002 --min-accuracy 1.0 --baseline reports/eval_v2_fixed.json
 ```
 
-(Bước này giả định agent đã được khởi động trước đó trong job. Tôi chưa chạy nó trên GitHub Actions; các lệnh `run_eval.py` ở trên thì đã chạy local. Tôi cũng chưa chạy thử exit code của v1 so với baseline v2 như bài tập 4 yêu cầu.)
+(Bước này giả định agent đã được khởi động trước đó trong job. Tôi chưa chạy nó trên GitHub Actions; các lệnh `run_eval.py` đều đã chạy local.)
+
+**Kiểm tra quality gate với v1 (bài tập 4 của Exercise 7.3):** tôi chạy eval cho agent v1 với `--baseline reports/eval_v2.json` (không dùng `--out`, nên không tạo file). Kết quả thật:
+
+```text
+Accuracy: 91.3% (baseline v2) -> 4.3% (v1), -87.0 điểm %
+Câu bị regression: 20  ['docker-01', 'docker-02', 'probe-01', 'probe-02', 'reliability-01', 'config-01',
+  'security-01', 'scaling-01', 'scaling-02', 'bench-01', 'bench-02', 'obs-01', 'obs-02', 'obs-03',
+  'obs-04', 'obs-05', 'obs-06', 'slo-01', 'cost-01', 'cloud-01']
+Quality gate (accuracy >= 80%, không regression): FAIL
+exit code = 1
+```
+
+Exit code 1 là thứ làm job CI thất bại và chặn merge, vì GitHub Actions coi bước có exit code khác 0 là lỗi. Gate fail ở cả hai điều kiện: accuracy thấp hơn ngưỡng 80% và có 20 câu từng đúng ở baseline giờ sai.
 
 **Nhận xét về trade-off v1 / v2:**
 - v2 dùng retrieval nên prompt dài hơn: số token trung bình mỗi câu tăng 1,9 lần (57.4 → 108.8), tổng cost tăng khoảng 1,85 lần.
