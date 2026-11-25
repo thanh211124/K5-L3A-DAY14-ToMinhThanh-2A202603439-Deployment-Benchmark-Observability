@@ -107,6 +107,16 @@ pause_for_screenshot() { # pause_for_screenshot "<hướng dẫn>"
   read -r _ </dev/tty
 }
 
+ensure_stack() { # bật đủ mọi service (prometheus/grafana/locust không tự lên lại nếu Docker/Codespace khởi động lại)
+  note "Kiểm tra stack: bật các service còn thiếu (up -d --scale agent=2)..."
+  dc up -d --scale agent=2 2>&1 | tail -3 | tee -a "$OUT"
+  wait_http http://localhost:8080/health 120
+  wait_http http://localhost:9090/-/ready 120
+  wait_http http://localhost:3000/api/health 120
+  sleep 10
+  dc ps 2>&1 | tee -a "$OUT"
+}
+
 stage_up() {
   log "UP — bật stack và unit test alert"
   cmd "docker compose -p $PROJECT up -d --build --scale agent=2"
@@ -168,6 +178,7 @@ stage_scale() {
 }
 
 stage_trace() {
+  ensure_stack
   log "TRACE — tạo tải ngắn (20 user, 90 giây) để có trace chậm và trace lỗi"
   note "(tăng nhẹ tỉ lệ lỗi và chậm để chắc chắn có mẫu: MOCK_ERROR_RATE=0.1, MOCK_SLOW_RATE=0.1)"
   agent_up "MOCK_ERROR_RATE=0.1 MOCK_SLOW_RATE=0.1"
@@ -233,6 +244,7 @@ print(m.group(1) if m else '')
 }
 
 stage_chaos() {
+  ensure_stack
   log "CHAOS — thí nghiệm phá hệ thống (giữ ~30 user Locust chạy nền suốt thời gian này)"
   agent_up "AGENT_VERSION=v2"
   start_load 30
