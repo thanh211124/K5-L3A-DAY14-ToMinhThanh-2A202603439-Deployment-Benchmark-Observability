@@ -1,0 +1,220 @@
+
+### PART 2 / Exercise 2.4 — Docker Compose stack
+$ cd 02-docker/production && docker compose --progress quiet -p k5-day14-stack up -d --build 2>&1 | grep -v "attribute .version. is obsolete"
+OK http://localhost/health sau ~2s
+$ cd 02-docker/production && docker compose -p k5-day14-stack ps
+NAME                      IMAGE                  COMMAND                  SERVICE   CREATED          STATUS                            PORTS
+k5-day14-stack-agent-1    k5-day14-stack-agent   "uvicorn main:app --…"   agent     13 seconds ago   Up 2 seconds (health: starting)   8000/tcp
+k5-day14-stack-nginx-1    nginx:alpine           "/docker-entrypoint.…"   nginx     13 seconds ago   Up 2 seconds                      0.0.0.0:80->80/tcp, [::]:80->80/tcp, 0.0.0.0:443->443/tcp, [::]:443->443/tcp
+k5-day14-stack-qdrant-1   qdrant/qdrant:v1.9.0   "./entrypoint.sh"        qdrant    13 seconds ago   Up 12 seconds (healthy)           6333-6334/tcp
+k5-day14-stack-redis-1    redis:7-alpine         "docker-entrypoint.s…"   redis     13 seconds ago   Up 13 seconds (healthy)           6379/tcp
+$ curl -s -i http://localhost/health
+HTTP/1.1 200 OK
+Server: nginx
+Date: Wed, 25 Nov 2026 10:31:33 GMT
+Content-Type: application/json
+Content-Length: 95
+Connection: keep-alive
+X-Frame-Options: DENY
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 1; mode=block
+
+{"status":"ok","uptime_seconds":0.7,"version":"2.0.0","timestamp":"2026-11-25T10:31:33.512793"}
+$ curl -s -i -X POST http://localhost/ask -H "Content-Type: application/json" -d "{\"question\":\"Explain microservices\"}"
+HTTP/1.1 200 OK
+Server: nginx
+Date: Wed, 25 Nov 2026 10:31:33 GMT
+Content-Type: application/json
+Content-Length: 95
+Connection: keep-alive
+X-Frame-Options: DENY
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 1; mode=block
+
+{"answer":"Agent đang hoạt động tốt! (mock response) Hỏi thêm câu hỏi đi nhé."}
+$ cd 02-docker/production && docker compose -p k5-day14-stack logs --no-color --tail=10 agent
+agent-1  | INFO:     Waiting for application startup.
+agent-1  | {"time":"2026-11-25 10:31:32,861","level":"INFO","msg":"Starting agent..."}
+agent-1  | {"time":"2026-11-25 10:31:32,940","level":"INFO","msg":"Agent ready"}
+agent-1  | INFO:     Application startup complete.
+agent-1  | {"time":"2026-11-25 10:31:32,961","level":"INFO","msg":"Agent ready"}
+agent-1  | INFO:     Application startup complete.
+agent-1  | INFO:     172.18.0.5:32886 - "GET /health HTTP/1.1" 200 OK
+agent-1  | INFO:     172.18.0.5:32886 - "GET /health HTTP/1.1" 200 OK
+agent-1  | {"time":"2026-11-25 10:31:33,529","level":"INFO","msg":"{"event": "request", "q_len": 21}"}
+agent-1  | INFO:     172.18.0.5:32886 - "POST /ask HTTP/1.1" 200 OK
+$ cd 02-docker/production && docker compose -p k5-day14-stack down -v
+ Container k5-day14-stack-nginx-1 Stopping 
+ Container k5-day14-stack-nginx-1 Stopped 
+ Container k5-day14-stack-nginx-1 Removing 
+ Container k5-day14-stack-nginx-1 Removed 
+ Container k5-day14-stack-agent-1 Stopping 
+ Container k5-day14-stack-agent-1 Stopped 
+ Container k5-day14-stack-agent-1 Removing 
+ Container k5-day14-stack-agent-1 Removed 
+ Container k5-day14-stack-qdrant-1 Stopping 
+ Container k5-day14-stack-redis-1 Stopping 
+ Container k5-day14-stack-qdrant-1 Stopped 
+ Container k5-day14-stack-qdrant-1 Removing 
+ Container k5-day14-stack-redis-1 Stopped 
+ Container k5-day14-stack-redis-1 Removing 
+ Container k5-day14-stack-qdrant-1 Removed 
+ Container k5-day14-stack-redis-1 Removed 
+ Volume k5-day14-stack_qdrant_data Removing 
+ Volume k5-day14-stack_redis_data Removing 
+ Network k5-day14-stack_internal Removing 
+ Volume k5-day14-stack_redis_data Removed 
+ Volume k5-day14-stack_qdrant_data Removed 
+ Network k5-day14-stack_internal Removed 
+
+### PART 5 / Exercise 5.4 — Nginx load balancer, 3 instance
+$ cd 05-scaling-reliability/production && docker compose --progress quiet -p k5-day14-scaling up -d --build --scale agent=3 2>&1 | grep -v "attribute .version. is obsolete"
+OK http://localhost:8080/health sau ~12s
+$ cd 05-scaling-reliability/production && docker compose -p k5-day14-scaling ps
+NAME                       IMAGE                    COMMAND                  SERVICE   CREATED          STATUS                    PORTS
+k5-day14-scaling-agent-1   k5-day14-scaling-agent   "python -m uvicorn a…"   agent     27 seconds ago   Up 16 seconds (healthy)   8000/tcp
+k5-day14-scaling-agent-2   k5-day14-scaling-agent   "python -m uvicorn a…"   agent     27 seconds ago   Up 16 seconds (healthy)   8000/tcp
+k5-day14-scaling-agent-3   k5-day14-scaling-agent   "python -m uvicorn a…"   agent     27 seconds ago   Up 16 seconds (healthy)   8000/tcp
+k5-day14-scaling-nginx-1   nginx:alpine             "/docker-entrypoint.…"   nginx     27 seconds ago   Up 15 seconds             0.0.0.0:8080->80/tcp, [::]:8080->80/tcp
+k5-day14-scaling-redis-1   redis:7-alpine           "docker-entrypoint.s…"   redis     28 seconds ago   Up 27 seconds (healthy)   6379/tcp
+$ curl -s -i -X POST http://localhost:8080/chat -H "Content-Type: application/json" -d "{\"question\":\"probe\"}" | head -20
+HTTP/1.1 200 OK
+Server: nginx/1.31.10
+Date: Wed, 25 Nov 2026 10:32:03 GMT
+Content-Type: application/json
+Content-Length: 254
+Connection: keep-alive
+X-Served-By: 172.18.0.3:8000
+
+{"session_id":"076c9e54-d8d5-4594-9326-f3f699814930","question":"probe","answer":"Đây là câu trả lời từ AI agent (mock). Trong production, đây sẽ là response từ OpenAI/Anthropic.","turn":2,"served_by":"instance-398a1d","storage":"redis"}
+
+### PART 5 / Exercise 5.4 — 10 request, xem instance nào phục vụ (served_by)
+request 1 -> instance-5c40aa
+request 2 -> instance-398a1d
+request 3 -> instance-0ba4f3
+request 4 -> instance-5c40aa
+request 5 -> instance-398a1d
+request 6 -> instance-0ba4f3
+request 7 -> instance-5c40aa
+request 8 -> instance-398a1d
+request 9 -> instance-0ba4f3
+request 10 -> instance-5c40aa
+
+### PART 5 / Exercise 5.5 — test_stateless.py
+$ cd 05-scaling-reliability/production && python test_stateless.py 2>&1 | tail -40
+
+Request 1: [instance-398a1d]
+  Q: What is Docker?
+  A: Container là cách đóng gói app để chạy ở mọi nơi. Build once, run anywhere!...
+
+Request 2: [instance-0ba4f3]
+  Q: Why do we need containers?
+  A: Agent đang hoạt động tốt! (mock response) Hỏi thêm câu hỏi đi nhé....
+
+Request 3: [instance-5c40aa]
+  Q: What is Kubernetes?
+  A: Agent đang hoạt động tốt! (mock response) Hỏi thêm câu hỏi đi nhé....
+
+Request 4: [instance-398a1d]
+  Q: How does load balancing work?
+  A: Tôi là AI agent được deploy lên cloud. Câu hỏi của bạn đã được nhận....
+
+Request 5: [instance-0ba4f3]
+  Q: What is Redis used for?
+  A: Agent đang hoạt động tốt! (mock response) Hỏi thêm câu hỏi đi nhé....
+
+------------------------------------------------------------
+Total requests: 5
+Instances used: {'instance-5c40aa', 'instance-0ba4f3', 'instance-398a1d'}
+✅ All requests served despite different instances!
+
+--- Conversation History ---
+Total messages: 10
+  [user]: What is Docker?...
+  [assistant]: Container là cách đóng gói app để chạy ở mọi nơi. Build once...
+  [user]: Why do we need containers?...
+  [assistant]: Agent đang hoạt động tốt! (mock response) Hỏi thêm câu hỏi đ...
+  [user]: What is Kubernetes?...
+  [assistant]: Agent đang hoạt động tốt! (mock response) Hỏi thêm câu hỏi đ...
+  [user]: How does load balancing work?...
+  [assistant]: Tôi là AI agent được deploy lên cloud. Câu hỏi của bạn đã đư...
+  [user]: What is Redis used for?...
+  [assistant]: Agent đang hoạt động tốt! (mock response) Hỏi thêm câu hỏi đ...
+
+✅ Session history preserved across all instances via Redis!
+
+### PART 5 / Exercise 5.5 (mở rộng) — dừng 1 instance rồi gọi tiếp cùng session
+session_id = 216e06db-1154-45ae-b0d9-6562999c8f67
+dừng container: ccf6fcaa0922ac3114f6d6aa4c03b5a0be4c1b9a76ab9e468b1a6c1ea4255426
+ccf6fcaa0922ac3114f6d6aa4c03b5a0be4c1b9a76ab9e468b1a6c1ea4255426
+after kill 1 -> served_by instance-5c40aa
+after kill 2 -> served_by instance-398a1d
+after kill 3 -> served_by instance-5c40aa
+$ curl -s http://localhost:8080/chat/216e06db-1154-45ae-b0d9-6562999c8f67/history | python -c "import sys,json; d=json.load(sys.stdin); print('messages in history:', d['count'])" 2>&1 | tail -1
+messages in history: 8
+$ cd 05-scaling-reliability/production && docker compose -p k5-day14-scaling logs --no-color --tail=40 agent | grep -E "POST|Starting instance|Shutting"
+agent-3  | INFO:app:Starting instance instance-398a1d
+agent-3  | INFO:     172.18.0.6:60408 - "POST /chat HTTP/1.1" 200 OK
+agent-3  | INFO:     172.18.0.6:60408 - "POST /chat HTTP/1.1" 200 OK
+agent-3  | INFO:     172.18.0.6:60408 - "POST /chat HTTP/1.1" 200 OK
+agent-3  | INFO:     172.18.0.6:60408 - "POST /chat HTTP/1.1" 200 OK
+agent-3  | INFO:     172.18.0.6:60408 - "POST /chat HTTP/1.1" 200 OK
+agent-3  | INFO:     172.18.0.6:60408 - "POST /chat HTTP/1.1" 200 OK
+agent-3  | INFO:     172.18.0.6:60408 - "POST /chat HTTP/1.1" 200 OK
+agent-3  | INFO:     172.18.0.6:53354 - "POST /chat HTTP/1.1" 200 OK
+agent-2  | INFO:app:Starting instance instance-5c40aa
+agent-2  | INFO:     172.18.0.6:40288 - "POST /chat HTTP/1.1" 200 OK
+agent-2  | INFO:     172.18.0.6:40288 - "POST /chat HTTP/1.1" 200 OK
+agent-2  | INFO:     172.18.0.6:40288 - "POST /chat HTTP/1.1" 200 OK
+agent-2  | INFO:     172.18.0.6:40288 - "POST /chat HTTP/1.1" 200 OK
+agent-2  | INFO:     172.18.0.6:40288 - "POST /chat HTTP/1.1" 200 OK
+agent-2  | INFO:     172.18.0.6:47874 - "POST /chat HTTP/1.1" 200 OK
+agent-2  | INFO:     172.18.0.6:47874 - "POST /chat HTTP/1.1" 200 OK
+agent-1  | INFO:app:Starting instance instance-0ba4f3
+agent-1  | INFO:     172.18.0.6:55108 - "POST /chat HTTP/1.1" 200 OK
+agent-1  | INFO:     172.18.0.6:55108 - "POST /chat HTTP/1.1" 200 OK
+agent-1  | INFO:     172.18.0.6:55108 - "POST /chat HTTP/1.1" 200 OK
+agent-1  | INFO:     172.18.0.6:55108 - "POST /chat HTTP/1.1" 200 OK
+agent-1  | INFO:     172.18.0.6:55108 - "POST /chat HTTP/1.1" 200 OK
+agent-1  | INFO:     Shutting down
+$ cd 05-scaling-reliability/production && docker compose -p k5-day14-scaling logs --no-color --tail=15 nginx
+nginx-1  | 172.18.0.1 - - [25/Nov/2026:10:32:04 +0000] "POST /chat HTTP/1.1" 200 258 "-" "curl/8.5.0"
+nginx-1  | 172.18.0.1 - - [25/Nov/2026:10:32:04 +0000] "POST /chat HTTP/1.1" 200 235 "-" "curl/8.5.0"
+nginx-1  | 172.18.0.1 - - [25/Nov/2026:10:32:05 +0000] "POST /chat HTTP/1.1" 200 228 "-" "curl/8.5.0"
+nginx-1  | 172.18.0.1 - - [25/Nov/2026:10:32:05 +0000] "POST /chat HTTP/1.1" 200 241 "-" "Python-urllib/3.14"
+nginx-1  | 172.18.0.1 - - [25/Nov/2026:10:32:05 +0000] "POST /chat HTTP/1.1" 200 244 "-" "Python-urllib/3.14"
+nginx-1  | 172.18.0.1 - - [25/Nov/2026:10:32:05 +0000] "POST /chat HTTP/1.1" 200 237 "-" "Python-urllib/3.14"
+nginx-1  | 172.18.0.1 - - [25/Nov/2026:10:32:05 +0000] "POST /chat HTTP/1.1" 200 255 "-" "Python-urllib/3.14"
+nginx-1  | 172.18.0.1 - - [25/Nov/2026:10:32:05 +0000] "POST /chat HTTP/1.1" 200 241 "-" "Python-urllib/3.14"
+nginx-1  | 172.18.0.1 - - [25/Nov/2026:10:32:05 +0000] "GET /chat/7a89f48a-c427-4170-8f72-2b6cdfc1a866/history HTTP/1.1" 200 1400 "-" "Python-urllib/3.14"
+nginx-1  | 172.18.0.1 - - [25/Nov/2026:10:32:06 +0000] "POST /chat HTTP/1.1" 200 240 "-" "curl/8.5.0"
+nginx-1  | 2026/11/25 10:33:08 [error] 30#30: *37 upstream timed out (110: Operation timed out) while connecting to upstream, client: 172.18.0.1, server: , request: "POST /chat HTTP/1.1", upstream: "http://172.18.0.4:8000/chat", host: "localhost:8080"
+nginx-1  | 172.18.0.1 - - [25/Nov/2026:10:33:08 +0000] "POST /chat HTTP/1.1" 200 238 "-" "curl/8.5.0"
+nginx-1  | 172.18.0.1 - - [25/Nov/2026:10:33:08 +0000] "POST /chat HTTP/1.1" 200 238 "-" "curl/8.5.0"
+nginx-1  | 172.18.0.1 - - [25/Nov/2026:10:33:09 +0000] "POST /chat HTTP/1.1" 200 230 "-" "curl/8.5.0"
+nginx-1  | 172.18.0.1 - - [25/Nov/2026:10:33:09 +0000] "GET /chat/216e06db-1154-45ae-b0d9-6562999c8f67/history HTTP/1.1" 200 1106 "-" "curl/8.5.0"
+$ cd 05-scaling-reliability/production && docker compose -p k5-day14-scaling down -v
+ Container k5-day14-scaling-nginx-1 Stopping 
+ Container k5-day14-scaling-nginx-1 Stopped 
+ Container k5-day14-scaling-nginx-1 Removing 
+ Container k5-day14-scaling-nginx-1 Removed 
+ Container k5-day14-scaling-agent-2 Stopping 
+ Container k5-day14-scaling-agent-3 Stopping 
+ Container k5-day14-scaling-agent-1 Stopping 
+ Container k5-day14-scaling-agent-1 Stopped 
+ Container k5-day14-scaling-agent-1 Removing 
+ Container k5-day14-scaling-agent-1 Removed 
+ Container k5-day14-scaling-agent-2 Stopped 
+ Container k5-day14-scaling-agent-2 Removing 
+ Container k5-day14-scaling-agent-2 Removed 
+ Container k5-day14-scaling-agent-3 Stopped 
+ Container k5-day14-scaling-agent-3 Removing 
+ Container k5-day14-scaling-agent-3 Removed 
+ Container k5-day14-scaling-redis-1 Stopping 
+ Container k5-day14-scaling-redis-1 Stopped 
+ Container k5-day14-scaling-redis-1 Removing 
+ Container k5-day14-scaling-redis-1 Removed 
+ Network k5-day14-scaling_agent_net Removing 
+ Network k5-day14-scaling_agent_net Removed 
+
+### XONG
