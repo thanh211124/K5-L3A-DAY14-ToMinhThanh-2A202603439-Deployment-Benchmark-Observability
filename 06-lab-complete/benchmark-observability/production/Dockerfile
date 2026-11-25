@@ -29,6 +29,9 @@ ENV PATH=/home/agent/.local/bin:$PATH
 ENV PYTHONPATH=/app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+# User "agent" có home là /app, nên user-site mặc định là /app/.local.
+# Thư viện được copy vào /home/agent/.local → phải chỉ rõ để Python tìm thấy.
+ENV PYTHONUSERBASE=/home/agent/.local
 
 EXPOSE 8000
 
