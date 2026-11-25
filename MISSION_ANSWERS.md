@@ -419,6 +419,7 @@ Session history preserved across all instances via Redis!
 
 - Lần chạy đầu trong Codespaces bị lỗi cài đặt vì Python 3.14 không build được `pydantic==2.9.0` (không có wheel cp314), nên tôi nới các version ghim trong `requirements.txt` thành `>=`.
 - Trên máy Windows của tôi script chỉ chạy được một phần (không có Docker, Redis, SIGTERM). Kết quả đầy đủ chỉ lấy từ Codespaces.
+- **Chạy lại trên bản cuối** (commit `1575f18`, sau khi sửa `redis_client.py` và `render.yaml`), cũng trong Codespaces: `Result: 12/12 tiêu chí đạt · 43/43 checks passed` và `PASS 12/12 — PRODUCTION READY!`.
 
 ## Part 7
 
