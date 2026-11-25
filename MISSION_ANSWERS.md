@@ -1,6 +1,6 @@
 # Day 14 Lab — Mission Answers
 
-> **Trạng thái:** Part 1, Part 4 đã làm và đo thật (chạy trên Windows, Python 3.14, không Docker). Part 6 đạt `PASS 12/12` (chạy trong Codespaces). Part 3 đã deploy lên Render (có 3 ảnh). Part 2 và Part 5 đã chạy trong Codespaces và ghi số đo thật. Phần còn thiếu của cả bài là Part 7 Bước 2 (xem `BENCHMARK_REPORT.md`).
+> **Trạng thái:** Part 1, Part 4 đã làm và đo thật (chạy trên Windows, Python 3.14, không Docker). Part 6 đạt `PASS 12/12` (chạy trong Codespaces). Part 3 đã deploy lên Render (có 3 ảnh). Part 2 và Part 5 đã chạy trong Codespaces và ghi số đo thật. Part 7 (Bước 1 và Bước 2) đã làm, xem `BENCHMARK_REPORT.md`.
 
 ---
 
@@ -422,7 +422,7 @@ Session history preserved across all instances via Redis!
 
 ## Part 7
 
-Xem `BENCHMARK_REPORT.md`. Bước 1 (local) đã làm; Bước 2 (Docker stack) chưa làm.
+Xem `BENCHMARK_REPORT.md`. Cả Bước 1 (local) và Bước 2 (Docker stack trong Codespaces: Grafana, Jaeger, alert, Locust scale 1 và 3) đã làm. Log: `evidence/part7.log`; CSV: `benchmark-results/`; ảnh: `screenshots/`.
 
 ---
 
@@ -437,5 +437,6 @@ Xem `BENCHMARK_REPORT.md`. Bước 1 (local) đã làm; Bước 2 (Docker stack)
 | 5 | Part 1 và Part 4: chạy bài tập và viết câu trả lời | AI chạy các lệnh curl trên máy và ghi output | Output ở trên là kết quả chạy thật; phần nhận xét tôi cần đọc lại và tự giải thích được |
 | 6 | Deploy lên Render, sửa lỗi `REDIS_URL` sai định dạng làm container sập | AI đọc stack trace, sửa `app/redis_client.py` (thêm scheme, không sập khi URL sai), viết `DEPLOYMENT.md` và mục Part 3 | Gọi `/health`, `/ready` từ ngoài (200/200); 4 lệnh tự kiểm cho kết quả 200 200 401 200; kiểm tra lại logic với nhiều dạng URL sai |
 | 7 | Part 2 và Part 5 trong Codespaces (script thu thập log) | AI viết `scripts/part2_part5.sh` và `scripts/rerun_compose_scaling.sh`, phân tích log, sửa lỗi script chờ sai (coi 502 là sẵn sàng) và viết câu trả lời | Số liệu lấy từ `evidence/*.log` do tôi chạy; kích thước image, SIGTERM, round-robin 4/3/3 và phép thử dừng instance đều có trong log |
+| 8 | Part 7 Bước 2: stack Prometheus/Grafana/Jaeger/Locust trong Codespaces | AI viết `scripts/part7.sh` (các giai đoạn up, scale, trace, chaos, down), sửa lỗi Dockerfile thiếu `PYTHONUSERBASE` và lỗi xuống dòng CRLF của script, rồi điền mục 4, 5, 6 của `BENCHMARK_REPORT.md` | Số liệu lấy từ `evidence/part7.log` và CSV Locust do tôi chạy; ảnh Grafana, Jaeger, Prometheus do tôi tự chụp; thời gian alert khớp `for:` trong `alert_rules.yml` |
 
 > Ghi chú: mục AI log cần được tôi xem lại và tự giải thích được từng đoạn code trước khi nộp (theo RULES.md).
